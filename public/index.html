@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <title>HomeCam — Caméra</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;600;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #080a0d; --surface: #0f1318; --border: #1c2330;
+      --accent: #00e5a0; --red: #ff3b3b; --yellow: #f5c542;
+      --text: #b8cad8; --mono: 'Share Tech Mono', monospace; --body: 'Barlow', sans-serif;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--body); }
+
+    .screen { display: none; min-height: 100dvh; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 1.5rem; gap: 1.5rem; }
+    .screen.active { display: flex; }
+
+    #setup {
+      background: radial-gradient(ellipse 70% 40% at 50% 0%, rgba(0,229,160,0.06) 0%, transparent 70%), var(--bg);
+    }
+
+    .badge { font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.3em; color: var(--accent); opacity: 0.7; }
+    h1 { font-size: clamp(1.8rem, 7vw, 2.8rem); font-weight: 700; color: #fff; text-align: center; line-height: 1.15; }
+    h1 span { color: var(--accent); }
+    .desc { font-size: 0.88rem; font-weight: 300; color: var(--text); text-align: center; max-width: 300px; line-height: 1.6; opacity: 0.7; }
+
+    .info-box {
+      width: 100%; max-width: 340px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 1.2rem 1.4rem; display: flex; flex-direction: column; gap: 0.4rem;
+    }
+    .info-label { font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.2em; color: var(--accent); opacity: 0.7; }
+    .info-value { font-family: var(--mono); font-size: 1.3rem; color: #fff; }
+    .info-hint  { font-size: 0.75rem; color: var(--text); opacity: 0.5; line-height: 1.5; }
+
+    .btn-main {
+      width: 100%; max-width: 340px;
+      display: flex; align-items: center; justify-content: center; gap: 0.7rem;
+      background: var(--accent); color: #000;
+      font-family: var(--mono); font-size: 0.88rem; letter-spacing: 0.1em;
+      border: none; border-radius: 10px; padding: 1rem;
+      cursor: pointer; font-weight: 700;
+      transition: opacity 0.2s, transform 0.15s;
+    }
+    .btn-main:disabled { opacity: 0.35; cursor: default; }
+    .btn-main:not(:disabled):active { transform: scale(0.97); }
+
+    .status-row { display: flex; align-items: center; gap: 0.55rem; font-family: var(--mono); font-size: 0.75rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green  { background: var(--accent); animation: pulse 1.5s infinite; }
+    .dot.red    { background: var(--red); }
+    .dot.yellow { background: var(--yellow); animation: pulse 0.8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
+
+    /* ── STREAMING ── */
+    #streaming { padding: 0; position: relative; background: #000; justify-content: flex-start; }
+    #localVideo { width: 100%; height: 100dvh; object-fit: cover; display: block; }
+
+    .hud { position: absolute; inset: 0; pointer-events: none; }
+    .corner { position: absolute; width: 20px; height: 20px; border-color: var(--accent); border-style: solid; opacity: 0.7; }
+    .corner.tl { top:14px; left:14px; border-width:2px 0 0 2px; }
+    .corner.tr { top:14px; right:14px; border-width:2px 2px 0 0; }
+    .corner.bl { bottom:14px; left:14px; border-width:0 0 2px 2px; }
+    .corner.br { bottom:14px; right:14px; border-width:0 2px 2px 0; }
+    .scanline { position:absolute; top:-2px; left:0; right:0; height:2px; background:linear-gradient(to right,transparent,rgba(0,229,160,0.25),transparent); animation:scan 5s linear infinite; }
+    @keyframes scan { from{top:-2px}to{top:100%} }
+    .vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.6) 100%); }
+
+    .hud-top { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(to bottom,rgba(0,0,0,0.65),transparent); }
+    .hud-tag { font-family:var(--mono); font-size:0.65rem; letter-spacing:0.15em; color:var(--accent); }
+    .rec-badge { display:flex; align-items:center; gap:5px; font-family:var(--mono); font-size:0.65rem; color:#fff; }
+    #streamClock { font-family:var(--mono); font-size:0.65rem; color:rgba(255,255,255,0.55); }
+
+    .hud-bottom { position:absolute; bottom:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(to top,rgba(0,0,0,0.65),transparent); pointer-events:auto; }
+
+    .hud-btn {
+      display:flex; align-items:center; gap:5px;
+      border-radius:6px; font-family:var(--mono); font-size:0.65rem; letter-spacing:0.1em;
+      padding:6px 10px; cursor:pointer; transition:background 0.2s; border-width:1px; border-style:solid;
+    }
+    .hud-btn.green { background:rgba(0,229,160,0.12); border-color:var(--accent); color:var(--accent); }
+    .hud-btn.red   { background:rgba(255,59,59,0.12); border-color:var(--red); color:var(--red); }
+    .hud-btn.green:hover { background:rgba(0,229,160,0.22); }
+    .hud-btn.red:hover   { background:rgba(255,59,59,0.25); }
+  </style>
+</head>
+<body>
+
+<!-- ── SETUP ── -->
+<div id="setup" class="screen active">
+  <div class="badge">📷 MODE CAMÉRA</div>
+  <h1>HomeCam<br/><span>Surveillance</span></h1>
+  <p class="desc">Ton téléphone se connecte au serveur. Le viewer verra ta caméra dans la liste automatiquement.</p>
+
+  <div class="info-box">
+    <div class="info-label">STATUT SERVEUR</div>
+    <div class="info-value" id="camNumber">—</div>
+    <div class="info-hint">Une fois connecté, tu apparaîtras comme "Caméra X" dans la liste du viewer.</div>
+  </div>
+
+  <button class="btn-main" id="btnStart" disabled>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/>
+    </svg>
+    DÉMARRER LA CAMÉRA
+  </button>
+
+  <div class="status-row">
+    <div class="dot yellow" id="statusDot"></div>
+    <span id="statusText">Connexion au serveur…</span>
+  </div>
+</div>
+
+<!-- ── STREAMING ── -->
+<div id="streaming" class="screen">
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div class="hud">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="scanline"></div><div class="vignette"></div>
+    <div class="hud-top">
+      <div class="hud-tag" id="camLabel">CH·01</div>
+      <div class="rec-badge"><div class="dot red" style="animation:pulse 1s infinite"></div> LIVE</div>
+      <div id="streamClock">--:--:--</div>
+    </div>
+    <div class="hud-bottom">
+      <button class="hud-btn green" id="btn-flip">🔄 BASCULER</button>
+      <button class="hud-btn red"   id="btn-stop">⏹ ARRÊTER</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ──
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+
+let ws = null;
+let localStream = null;
+let facingMode = 'user';
+let myCamId = null;
+let myNumber = null;
+// Map viewerWsId -> RTCPeerConnection
+const peerConns = new Map();
+
+// ── Horloge ──
+setInterval(() => {
+  document.getElementById('streamClock').textContent =
+    new Date().toLocaleTimeString('fr-FR', { hour12: false });
+}, 1000);
+
+// ── WebSocket ──
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'register-camera' }));
+  };
+
+  ws.onmessage = async (evt) => {
+    const msg = JSON.parse(evt.data);
+
+    if (msg.type === 'registered') {
+      myCamId = msg.camId;
+      myNumber = msg.number;
+      document.getElementById('camNumber').textContent = 'Caméra ' + myNumber;
+      document.getElementById('statusDot').className = 'dot green';
+      document.getElementById('statusText').textContent = 'Serveur connecté — prêt';
+      document.getElementById('btnStart').disabled = false;
+    }
+
+    // Un viewer veut se connecter → créer une PeerConnection
+    if (msg.type === 'viewer-offer') {
+      const pc = createPC(msg.viewerWsId);
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+      // Ajouter les tracks locaux
+      if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      ws.send(JSON.stringify({ type: 'camera-answer', viewerWsId: msg.viewerWsId, answer }));
+    }
+
+    if (msg.type === 'ice-candidate') {
+      const pc = peerConns.get(msg.viewerWsId);
+      if (pc && msg.candidate) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch(e){}
+      }
+    }
+
+    if (msg.type === 'flip') {
+      flipCamera();
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('statusDot').className = 'dot red';
+    document.getElementById('statusText').textContent = 'Déconnecté — reconnexion…';
+    setTimeout(connectWS, 3000);
+  };
+}
+
+function createPC(viewerWsId) {
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  peerConns.set(viewerWsId, pc);
+
+  pc.onicecandidate = (evt) => {
+    if (evt.candidate) {
+      ws.send(JSON.stringify({ type: 'ice-candidate', to: 'viewer', camId: myCamId, viewerWsId, candidate: evt.candidate }));
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      peerConns.delete(viewerWsId);
+    }
+  };
+
+  return pc;
+}
+
+// ── Démarrer caméra ──
+document.getElementById('btnStart').addEventListener('click', async () => {
+  await startCamera('user');
+});
+
+async function startCamera(facing) {
+  try {
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+
+    facingMode = facing;
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+
+    document.getElementById('localVideo').srcObject = localStream;
+    document.getElementById('camLabel').textContent = 'CAM ' + myNumber + ' — ' + (facing === 'user' ? 'AVANT' : 'ARRIÈRE');
+
+    // Remplacer les tracks dans les PeerConnections actives
+    const videoTrack = localStream.getVideoTracks()[0];
+    peerConns.forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) sender.replaceTrack(videoTrack);
+    });
+
+    document.getElementById('setup').classList.remove('active');
+    document.getElementById('streaming').classList.add('active');
+  } catch (err) {
+    alert('Impossible d\'accéder à la caméra : ' + err.message);
+  }
+}
+
+// ── Basculer ──
+async function flipCamera() {
+  await startCamera(facingMode === 'user' ? 'environment' : 'user');
+}
+document.getElementById('btn-flip').addEventListener('click', flipCamera);
+
+// ── Arrêter ──
+document.getElementById('btn-stop').addEventListener('click', () => {
+  if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  peerConns.forEach(pc => pc.close()); peerConns.clear();
+  document.getElementById('localVideo').srcObject = null;
+  document.getElementById('streaming').classList.remove('active');
+  document.getElementById('setup').classList.add('active');
+  document.getElementById('statusText').textContent = 'Caméra arrêtée';
+});
+
+connectWS();
+</script>
+</body>
+</html>
