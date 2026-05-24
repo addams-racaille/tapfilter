@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+  <title>HomeCam — Viewer</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;600;700&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #080a0d; --surface: #0f1318; --border: #1c2330;
+      --accent: #4da6ff; --red: #ff3b3b; --green: #00e5a0; --yellow: #f5c542;
+      --text: #b8cad8; --mono: 'Share Tech Mono', monospace; --body: 'Barlow', sans-serif;
+    }
+
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--body); }
+
+    .screen { display: none; min-height: 100dvh; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 1.5rem; gap: 1.5rem; }
+    .screen.active { display: flex; }
+
+    /* ── LISTE ── */
+    #list-screen {
+      background: radial-gradient(ellipse 70% 40% at 50% 0%, rgba(77,166,255,0.06) 0%, transparent 70%), var(--bg);
+      justify-content: flex-start;
+      padding-top: 3rem;
+    }
+
+    .badge { font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.3em; color: var(--accent); opacity: 0.7; }
+    h1 { font-size: clamp(1.6rem, 6vw, 2.4rem); font-weight: 700; color: #fff; text-align: center; line-height: 1.15; }
+    h1 span { color: var(--accent); }
+
+    .status-row { display: flex; align-items: center; gap: 0.55rem; font-family: var(--mono); font-size: 0.72rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green  { background: var(--green); animation: pulse 1.5s infinite; }
+    .dot.blue   { background: var(--accent); animation: pulse 0.8s infinite; }
+    .dot.red    { background: var(--red); }
+    .dot.yellow { background: var(--yellow); animation: pulse 0.8s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.65)} }
+
+    /* Liste caméras */
+    #cam-list {
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .cam-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.1rem 1.3rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      gap: 1rem;
+    }
+    .cam-card:hover { border-color: var(--accent); background: rgba(77,166,255,0.05); }
+    .cam-card:active { transform: scale(0.98); }
+
+    .cam-card-left { display: flex; flex-direction: column; gap: 0.3rem; }
+    .cam-name { font-family: var(--mono); font-size: 1rem; color: #fff; }
+    .cam-sub  { font-size: 0.72rem; color: var(--text); opacity: 0.5; display: flex; align-items: center; gap: 5px; }
+
+    .btn-connect {
+      flex-shrink: 0;
+      background: var(--accent);
+      color: #000;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 12px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: opacity 0.2s;
+    }
+    .btn-connect:hover { opacity: 0.85; }
+
+    .empty-state {
+      width: 100%;
+      max-width: 340px;
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text);
+      opacity: 0.5;
+      line-height: 1.8;
+    }
+
+    /* ── WATCH ── */
+    #watch-screen { padding: 0; position: relative; background: #000; justify-content: flex-start; }
+    #remoteVideo { width: 100%; height: 100dvh; object-fit: cover; display: block; }
+
+    .hud { position: absolute; inset: 0; pointer-events: none; }
+    .corner { position: absolute; width: 20px; height: 20px; border-color: var(--accent); border-style: solid; opacity: 0.7; }
+    .corner.tl { top:14px; left:14px; border-width:2px 0 0 2px; }
+    .corner.tr { top:14px; right:14px; border-width:2px 2px 0 0; }
+    .corner.bl { bottom:14px; left:14px; border-width:0 0 2px 2px; }
+    .corner.br { bottom:14px; right:14px; border-width:0 2px 2px 0; }
+    .scanline { position:absolute; top:-2px; left:0; right:0; height:2px; background:linear-gradient(to right,transparent,rgba(77,166,255,0.25),transparent); animation:scan 5s linear infinite; }
+    @keyframes scan { from{top:-2px}to{top:100%} }
+    .vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.6) 100%); }
+
+    .hud-top { position:absolute; top:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(to bottom,rgba(0,0,0,0.65),transparent); }
+    .hud-tag { font-family:var(--mono); font-size:0.65rem; letter-spacing:0.15em; color:var(--accent); }
+    .live-badge { display:flex; align-items:center; gap:5px; font-family:var(--mono); font-size:0.65rem; color:#fff; }
+    #watchClock { font-family:var(--mono); font-size:0.65rem; color:rgba(255,255,255,0.55); }
+
+    .hud-bottom { position:absolute; bottom:0; left:0; right:0; display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:linear-gradient(to top,rgba(0,0,0,0.65),transparent); pointer-events:auto; }
+
+    .hud-btn { display:flex; align-items:center; gap:5px; border-radius:6px; font-family:var(--mono); font-size:0.65rem; letter-spacing:0.1em; padding:6px 10px; cursor:pointer; transition:background 0.2s; border-width:1px; border-style:solid; }
+    .hud-btn.blue { background:rgba(77,166,255,0.12); border-color:var(--accent); color:var(--accent); }
+    .hud-btn.red  { background:rgba(255,59,59,0.12); border-color:var(--red); color:var(--red); }
+    .hud-btn.blue:hover { background:rgba(77,166,255,0.22); }
+    .hud-btn.red:hover  { background:rgba(255,59,59,0.25); }
+
+    /* Loading */
+    #loadingOverlay { position:absolute; inset:0; background:#000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1rem; font-family:var(--mono); color:var(--accent); font-size:0.8rem; letter-spacing:0.1em; }
+    .spinner { width:36px; height:36px; border:2px solid #1c2330; border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+
+    #notif { position:absolute; top:44px; left:50%; transform:translateX(-50%); font-family:var(--mono); font-size:0.6rem; color:#fff; background:rgba(0,0,0,0.6); padding:4px 10px; border-radius:4px; white-space:nowrap; opacity:0; transition:opacity 0.3s; pointer-events:none; }
+    #notif.show { opacity:1; }
+  </style>
+</head>
+<body>
+
+<!-- ── LISTE DES CAMÉRAS ── -->
+<div id="list-screen" class="screen active">
+  <div class="badge">👁 MODE VIEWER</div>
+  <h1>HomeCam<br/><span>Viewer</span></h1>
+
+  <div class="status-row">
+    <div class="dot yellow" id="viewStatusDot"></div>
+    <span id="viewStatusText">Connexion au serveur…</span>
+  </div>
+
+  <div id="cam-list">
+    <div class="empty-state" id="emptyState">
+      Aucune caméra active.<br/>
+      Ouvre la page caméra sur<br/>ton téléphone pour commencer.
+    </div>
+  </div>
+</div>
+
+<!-- ── WATCH ── -->
+<div id="watch-screen" class="screen">
+  <video id="remoteVideo" autoplay playsinline></video>
+
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    CONNEXION AU FLUX…
+  </div>
+
+  <div id="notif"></div>
+
+  <div class="hud">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="scanline"></div><div class="vignette"></div>
+
+    <div class="hud-top">
+      <div class="hud-tag" id="watchTag">EN DIRECT</div>
+      <div class="live-badge"><div class="dot green"></div> LIVE</div>
+      <div id="watchClock">--:--:--</div>
+    </div>
+
+    <div class="hud-bottom">
+      <button class="hud-btn blue" id="btn-viewFlip">🔄 BASCULER CAM</button>
+      <button class="hud-btn red"  id="btn-disconnect">⏹ RETOUR</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+
+let ws = null;
+let pc = null;
+let currentCamId = null;
+let viewerWsId = 'viewer-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+
+// Horloge
+setInterval(() => {
+  document.getElementById('watchClock').textContent =
+    new Date().toLocaleTimeString('fr-FR', { hour12: false });
+}, 1000);
+
+// ── WebSocket ──
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'register-viewer' }));
+  };
+
+  ws.onmessage = async (evt) => {
+    const msg = JSON.parse(evt.data);
+
+    // Mise à jour de la liste
+    if (msg.type === 'camera-list') {
+      document.getElementById('viewStatusDot').className = 'dot green';
+      document.getElementById('viewStatusText').textContent = 'Serveur connecté';
+      renderCameraList(msg.cameras);
+    }
+
+    // Réponse de la caméra (SDP answer)
+    if (msg.type === 'camera-answer' && pc) {
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+    }
+
+    // ICE candidate de la caméra
+    if (msg.type === 'ice-candidate' && pc && msg.candidate) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); } catch(e) {}
+    }
+
+    if (msg.type === 'error') {
+      showNotif('❌ ' + msg.message);
+      goBack();
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('viewStatusDot').className = 'dot red';
+    document.getElementById('viewStatusText').textContent = 'Déconnecté — reconnexion…';
+    setTimeout(connectWS, 3000);
+  };
+}
+
+// ── Rendu liste ──
+function renderCameraList(cameras) {
+  const list = document.getElementById('cam-list');
+  const empty = document.getElementById('emptyState');
+
+  // Supprimer les anciennes cartes
+  list.querySelectorAll('.cam-card').forEach(el => el.remove());
+
+  if (cameras.length === 0) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  cameras.forEach(cam => {
+    const card = document.createElement('div');
+    card.className = 'cam-card';
+    card.innerHTML = `
+      <div class="cam-card-left">
+        <div class="cam-name">Caméra ${cam.number}</div>
+        <div class="cam-sub"><div class="dot green"></div> En ligne</div>
+      </div>
+      <button class="btn-connect">VOIR →</button>
+    `;
+    card.addEventListener('click', () => connectToCam(cam.id, cam.number));
+    list.appendChild(card);
+  });
+}
+
+// ── Connexion à une caméra ──
+async function connectToCam(camId, camNumber) {
+  currentCamId = camId;
+  document.getElementById('watchTag').textContent = 'CAMÉRA ' + camNumber + ' — DIRECT';
+
+  // Passer en écran watch
+  document.getElementById('list-screen').classList.remove('active');
+  document.getElementById('watch-screen').classList.add('active');
+  document.getElementById('loadingOverlay').style.display = 'flex';
+
+  // Créer PeerConnection
+  pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+  pc.ontrack = (evt) => {
+    const video = document.getElementById('remoteVideo');
+    video.srcObject = evt.streams[0];
+    video.play();
+    document.getElementById('loadingOverlay').style.display = 'none';
+  };
+
+  pc.onicecandidate = (evt) => {
+    if (evt.candidate) {
+      ws.send(JSON.stringify({
+        type: 'ice-candidate', to: 'camera',
+        camId, viewerWsId, candidate: evt.candidate
+      }));
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      showNotif('Connexion perdue');
+      setTimeout(goBack, 1500);
+    }
+  };
+
+  // Ajouter transceiver pour recevoir vidéo
+  pc.addTransceiver('video', { direction: 'recvonly' });
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  ws.send(JSON.stringify({
+    type: 'request-connect',
+    camId, viewerWsId,
+    offer: pc.localDescription
+  }));
+}
+
+// ── Basculer caméra ──
+document.getElementById('btn-viewFlip').addEventListener('click', () => {
+  if (currentCamId) {
+    ws.send(JSON.stringify({ type: 'flip-camera', camId: currentCamId }));
+    showNotif('Bascule en cours…');
+  }
+});
+
+// ── Retour ──
+document.getElementById('btn-disconnect').addEventListener('click', goBack);
+
+function goBack() {
+  if (pc) { pc.close(); pc = null; }
+  currentCamId = null;
+  document.getElementById('remoteVideo').srcObject = null;
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  document.getElementById('watch-screen').classList.remove('active');
+  document.getElementById('list-screen').classList.add('active');
+}
+
+function showNotif(msg) {
+  const n = document.getElementById('notif');
+  n.textContent = msg;
+  n.classList.add('show');
+  setTimeout(() => n.classList.remove('show'), 2500);
+}
+
+connectWS();
+</script>
+</body>
+</html>
