@@ -1,143 +1,59 @@
-const http = require('http');
-const { WebSocketServer } = require('ws');
-const path = require('path');
-const fs = require('fs');
+# HomeCam 🎥
 
-const PORT = process.env.PORT || 3000;
+Système de surveillance maison via navigateur. Aucune application à installer.
 
-// ── Serveur HTTP pour les fichiers statiques ──
-const server = http.createServer((req, res) => {
-  let filePath = path.join(__dirname, 'public');
+## Architecture
 
-  if (req.url === '/' || req.url === '/index.html') {
-    filePath = path.join(filePath, 'index.html');
-  } else if (req.url === '/viewer' || req.url === '/viewer.html') {
-    filePath = path.join(filePath, 'viewer.html');
-  } else {
-    res.writeHead(404);
-    return res.end('Not found');
-  }
+- **Téléphone** → ouvre `/` → devient une caméra en direct
+- **Viewer** → ouvre `/viewer` → voit la liste de toutes les caméras actives et se connecte
 
-  const ext = path.extname(filePath);
-  const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css' };
-  res.writeHead(200, { 'Content-Type': mime[ext] || 'text/plain' });
-  fs.createReadStream(filePath).pipe(res);
-});
+La vidéo passe en **WebRTC peer-to-peer** directement entre les appareils.  
+Le serveur sert uniquement à coordonner la connexion (signalisation).
 
-// ── WebSocket ──
-const wss = new WebSocketServer({ server });
+---
 
-// Map des caméras actives : camId -> { ws, number }
-const cameras = new Map();
-// Set des viewers
-const viewers = new Set();
-let camCounter = 0;
+## Déploiement sur Railway (gratuit)
 
-function broadcastCameraList() {
-  const list = [];
-  cameras.forEach((data, camId) => {
-    list.push({ id: camId, number: data.number });
-  });
-  const msg = JSON.stringify({ type: 'camera-list', cameras: list });
-  viewers.forEach(ws => { if (ws.readyState === 1) ws.send(msg); });
-}
+### 1. Créer un compte Railway
+→ https://railway.app (connecte-toi avec GitHub)
 
-wss.on('connection', (ws) => {
-  let role = null;
-  let myCamId = null;
+### 2. Nouveau projet
+- Clique **"New Project"**
+- Choisis **"Deploy from GitHub repo"**
+- Si pas de repo : clique **"Deploy from local"** et glisse le dossier
 
-  ws.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+### 3. Ou via GitHub (recommandé)
+1. Crée un repo GitHub (public ou privé)
+2. Upload tous les fichiers du projet
+3. Dans Railway → New Project → Deploy from GitHub → sélectionne ton repo
+4. Railway détecte automatiquement Node.js et lance `npm start`
 
-    switch (msg.type) {
+### 4. Obtenir l'URL
+- Dans Railway, va dans **Settings → Networking → Generate Domain**
+- Tu obtiens une URL comme `homecam-production.up.railway.app`
 
-      // ── Caméra s'enregistre ──
-      case 'register-camera': {
-        role = 'camera';
-        camCounter++;
-        myCamId = 'cam-' + Date.now();
-        cameras.set(myCamId, { ws, number: camCounter });
-        ws.send(JSON.stringify({ type: 'registered', camId: myCamId, number: camCounter }));
-        broadcastCameraList();
-        break;
-      }
+---
 
-      // ── Viewer demande la liste ──
-      case 'register-viewer': {
-        role = 'viewer';
-        viewers.add(ws);
-        broadcastCameraList();
-        break;
-      }
+## Utilisation
 
-      // ── Viewer veut se connecter à une cam ──
-      case 'request-connect': {
-        // msg.camId, msg.viewerOffer (SDP)
-        const cam = cameras.get(msg.camId);
-        if (!cam || cam.ws.readyState !== 1) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Caméra non disponible' }));
-          return;
-        }
-        // Transmettre l'offre à la caméra avec référence au viewer
-        cam.ws.send(JSON.stringify({
-          type: 'viewer-offer',
-          viewerWsId: msg.viewerWsId,
-          offer: msg.offer
-        }));
-        // Stocker référence viewer → ws pour la réponse
-        ws._wsId = msg.viewerWsId;
-        break;
-      }
+| Qui | Ouvre |
+|-----|-------|
+| Vieux téléphone (caméra) | `https://ton-url.railway.app/` |
+| Toi à distance (viewer)  | `https://ton-url.railway.app/viewer` |
 
-      // ── Caméra répond au viewer ──
-      case 'camera-answer': {
-        // Trouver le viewer par wsId
-        viewers.forEach(vws => {
-          if (vws._wsId === msg.viewerWsId && vws.readyState === 1) {
-            vws.send(JSON.stringify({ type: 'camera-answer', answer: msg.answer }));
-          }
-        });
-        break;
-      }
+### Étapes :
+1. Sur le vieux téléphone → `/` → **"Démarrer la caméra"** → autorise la caméra
+2. Le téléphone apparaît comme **"Caméra 1"** sur le viewer
+3. Sur ton autre appareil → `/viewer` → clique **"VOIR →"** sur Caméra 1
+4. Le flux démarre en direct
+5. Depuis le viewer tu peux cliquer **🔄 Basculer** pour changer avant/arrière
 
-      // ── ICE candidates ──
-      case 'ice-candidate': {
-        if (msg.to === 'camera') {
-          const cam = cameras.get(msg.camId);
-          if (cam && cam.ws.readyState === 1) {
-            cam.ws.send(JSON.stringify({ type: 'ice-candidate', candidate: msg.candidate, viewerWsId: msg.viewerWsId }));
-          }
-        } else if (msg.to === 'viewer') {
-          viewers.forEach(vws => {
-            if (vws._wsId === msg.viewerWsId && vws.readyState === 1) {
-              vws.send(JSON.stringify({ type: 'ice-candidate', candidate: msg.candidate }));
-            }
-          });
-        }
-        break;
-      }
+### Plusieurs caméras :
+Si tu connectes un 2e téléphone sur `/`, il apparaît comme **"Caméra 2"** automatiquement.
 
-      // ── Commande flip ──
-      case 'flip-camera': {
-        const cam = cameras.get(msg.camId);
-        if (cam && cam.ws.readyState === 1) {
-          cam.ws.send(JSON.stringify({ type: 'flip' }));
-        }
-        break;
-      }
-    }
-  });
+---
 
-  ws.on('close', () => {
-    if (role === 'camera' && myCamId) {
-      cameras.delete(myCamId);
-      broadcastCameraList();
-    }
-    if (role === 'viewer') {
-      viewers.delete(ws);
-    }
-  });
-});
-
-server.listen(PORT, () => console.log(`HomeCam server running on port ${PORT}`));
+## Notes
+- Fonctionne sur Chrome et Firefox mobile
+- HTTPS obligatoire pour accéder à la caméra (Railway fournit HTTPS automatiquement)
+- La caméra frontale est utilisée par défaut (l'arrière est cassée)
